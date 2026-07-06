@@ -64,7 +64,8 @@ RUN python -m pip install \
     "pynndescent==0.5.4" \
     "umap-learn==0.5.1" \
     "joblib==1.1.1" \
-    "threadpoolctl==2.2.0"
+    "threadpoolctl==2.2.0" \
+    "rdkit-pypi==2021.9.4"
 
 # Build from a local PANCDR checkout.
 # Run docker build from inside the PANCDR repo directory.

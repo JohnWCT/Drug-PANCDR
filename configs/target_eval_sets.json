@@ -1,0 +1,24 @@
+{
+  "target_eval_sets": [
+    {
+      "name": "target_primary",
+      "path": "DAPL-master/data/TCGA/PMID27354694_DR_OMICS_ad_intersect_pretrain_gdsc_intersect13.csv"
+    },
+    {
+      "name": "target_only",
+      "path": "DAPL-master/data/TCGA/PMID27354694_DR_OMICS_ad_intersect_pretrain_tcga_only3.csv"
+    },
+    {
+      "name": "dapl",
+      "path": "DAPL-master/data/TCGA/TCGA_drug_response_from_DAPL.csv"
+    },
+    {
+      "name": "target_aacdr",
+      "path": "DAPL-master/data/TCGA/TCGA_AACDR_response_final_with_smiles_intersect_pretrain_gdsc_intersect.csv"
+    },
+    {
+      "name": "target_aacdr_only",
+      "path": "DAPL-master/data/TCGA/TCGA_AACDR_response_final_with_smiles_intersect_pretrain_tcga_only.csv"
+    }
+  ]
+}
