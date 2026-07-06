@@ -1,0 +1,149 @@
+# syntax=docker/dockerfile:1.6
+FROM nvidia/cuda:11.1.1-cudnn8-devel-ubuntu18.04
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PROJECT_ROOT=/workspace \
+    PYTHONPATH=/workspace/src
+
+WORKDIR /workspace
+
+# -----------------------------------------------------------------------------
+# System packages
+# No conda: use Ubuntu 18.04's Python 3.6 runtime inside the Docker image.
+# PANCDR README used Python 3.6.10; Ubuntu 18.04 provides Python 3.6.x, which
+# is compatible with the pinned PyTorch 1.10.1 + cu111 stack.
+# -----------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl wget ca-certificates \
+    build-essential pkg-config \
+    python3.6 python3.6-dev python3-distutils \
+    unzip gzip bzip2 \
+    libglib2.0-0 libgl1-mesa-glx libxrender1 libxext6 libsm6 libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.6 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.6 /usr/local/bin/python3
+
+# Latest pip that still supports Python 3.6.
+RUN curl -fsSL https://bootstrap.pypa.io/pip/3.6/get-pip.py -o /tmp/get-pip.py \
+    && python /tmp/get-pip.py \
+        "pip==21.3.1" \
+        "setuptools==59.6.0" \
+        "wheel==0.37.1" \
+    && rm -f /tmp/get-pip.py \
+    && ln -sf /usr/local/bin/pip3 /usr/local/bin/pip
+
+# -----------------------------------------------------------------------------
+# PyTorch stack: CUDA 11.1 wheels, matching PANCDR requirements.txt.
+# torchaudio is intentionally omitted because PANCDR does not use audio and
+# pip may accidentally resolve a ROCm torchaudio wheel for Python 3.6.
+# -----------------------------------------------------------------------------
+RUN python -m pip install \
+    torch==1.10.1+cu111 \
+    torchvision==0.11.2+cu111 \
+    -f https://download.pytorch.org/whl/torch_stable.html
+
+# -----------------------------------------------------------------------------
+# PANCDR runtime dependencies.
+# Explicit pins avoid pip selecting packages that dropped Python 3.6 support.
+# -----------------------------------------------------------------------------
+RUN python -m pip install \
+    "numpy==1.19.5" \
+    "scipy==1.5.4" \
+    "pandas==1.0.1" \
+    "h5py==2.10.0" \
+    "hickle==3.4.5" \
+    "scikit-learn==0.24.2" \
+    "matplotlib==3.3.4" \
+    "llvmlite==0.36.0" \
+    "numba==0.53.1" \
+    "pynndescent==0.5.4" \
+    "umap-learn==0.5.1" \
+    "joblib==1.1.1" \
+    "threadpoolctl==2.2.0"
+
+# Build from a local PANCDR checkout.
+# Run docker build from inside the PANCDR repo directory.
+COPY . /workspace
+
+# -----------------------------------------------------------------------------
+# Project compatibility patches
+# -----------------------------------------------------------------------------
+# 1. Remove hard-coded CUDA_VISIBLE_DEVICES="8" in run scripts.
+# 2. Make device selection use any GPU exposed by `docker run --gpus`.
+# 3. Ensure checkpoint directories exist before training writes model files.
+RUN python - <<'PY'
+from pathlib import Path
+import re
+
+root = Path('/workspace')
+src = root / 'src'
+
+if src.exists():
+    # Patch run scripts, e.g. run_PANCDR.py.
+    for path in src.glob('run*.py'):
+        s = path.read_text()
+        s = re.sub(r"os\.environ\[['\"]CUDA_VISIBLE_DEVICES['\"]\]\s*=\s*['\"][^'\"]*['\"]\s*", "", s)
+        s = s.replace("device = torch.device('cuda')", "device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')")
+        s = s.replace('device = torch.device("cuda")', 'device = torch.device("cuda" if torch.cuda.is_available() else "cpu")')
+        path.write_text(s)
+
+    # Patch shared modules that define a global CUDA device.
+    for rel in ['src/utils.py', 'src/ModelTraining/PANCDR.py']:
+        path = root / rel
+        if path.exists():
+            s = path.read_text()
+            s = s.replace("device = torch.device('cuda')", "device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')")
+            s = s.replace('device = torch.device("cuda")', 'device = torch.device("cuda" if torch.cuda.is_available() else "cpu")')
+            path.write_text(s)
+
+(root / 'checkpoint').mkdir(parents=True, exist_ok=True)
+(root / 'checkpoint' / 'TCGA').mkdir(parents=True, exist_ok=True)
+(root / 'checkpoint' / 'kfold').mkdir(parents=True, exist_ok=True)
+PY
+
+# Convenience launcher. PANCDR should be run inside src/.
+RUN cat > /usr/local/bin/pancdr-run <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+cd /workspace/src
+exec python run_PANCDR.py "$@"
+SH
+RUN chmod +x /usr/local/bin/pancdr-run
+
+WORKDIR /workspace/src
+
+# -----------------------------------------------------------------------------
+# Build-time sanity check. CUDA is usually not visible at build time; this checks
+# package imports and version wiring only.
+# -----------------------------------------------------------------------------
+RUN python - <<'PY'
+import torch
+import torchvision
+import numpy
+import scipy
+import pandas
+import hickle
+import sklearn
+import matplotlib
+import umap
+
+print('python import check: OK')
+print('python:', __import__('sys').version)
+print('torch:', torch.__version__)
+print('torch cuda:', torch.version.cuda)
+print('cuda available during build:', torch.cuda.is_available())
+print('torchvision:', torchvision.__version__)
+print('numpy:', numpy.__version__)
+print('scipy:', scipy.__version__)
+print('pandas:', pandas.__version__)
+print('hickle:', hickle.__version__)
+print('sklearn:', sklearn.__version__)
+print('matplotlib:', matplotlib.__version__)
+PY
+
+CMD ["/bin/bash"]

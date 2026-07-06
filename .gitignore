@@ -1,0 +1,28 @@
+# Data and model artifacts (download separately from upstream PANCDR repo)
+data/
+checkpoint/
+
+# Training logs
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Optional: keep reproduction CSVs in repo; uncomment to ignore
+# src/TCGA_100train_results.csv
+# src/TCGA_smoke_results.csv
+# src/Base_TCGA_100train_results.csv
+# src/GDSC_nested.csv
