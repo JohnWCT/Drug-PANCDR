@@ -18,6 +18,7 @@ from sklearn.metrics import (
 
 from pancdr_pipeline.config import PANCDRPipelineConfig
 from pancdr_pipeline.datasets import FoldDataBundle, LabeledSplitData
+from pancdr_pipeline.drug_graph_adapter import DrugGraphBundle
 from pancdr_pipeline.drug_index import DrugIndexResult
 from pancdr_pipeline.model_adapter import PANCDRModelAdapter
 
@@ -62,8 +63,11 @@ def _predict_split(adapter, split_data, threshold):
         score = float(scores[i])
         rows.append(
             {
+                "eval_row_id": split_data.eval_row_ids[i] if i < len(split_data.eval_row_ids) else "",
                 "sample_id": split_data.sample_ids[i],
+                "drug_key": split_data.drug_keys[i] if i < len(split_data.drug_keys) else "",
                 "drug_name": split_data.drug_names[i],
+                "source_file": split_data.source_files[i] if i < len(split_data.source_files) else "",
                 "label": int(split_data.labels[i]),
                 "score": score,
                 "pred_label": int(score >= threshold),
@@ -143,10 +147,11 @@ def _metrics_from_predictions(pred_df, threshold, eval_name):
     return summary, pd.DataFrame(per_drug_rows)
 
 
-def evaluate_fold(adapter, bundle, drug_index_result, config, fold_id):
+def evaluate_fold(adapter, bundle, drug_index_result, drug_graph_bundle, config, fold_id):
     # type: (...) -> Dict[str, Dict[str, pd.DataFrame]]
     threshold = config.threshold
     results = {}
+    graph_keys = set(drug_graph_bundle.graphs.keys())
 
     eval_map = {"source_test": bundle.source_test}
     eval_map.update(bundle.target_eval_sets)
@@ -165,13 +170,11 @@ def evaluate_fold(adapter, bundle, drug_index_result, config, fold_id):
                 drug_index_result.drug_index["is_target_only_drug"] == 1, "drug_key"
             ].astype(str)
         )
-        pred["is_target_only_drug"] = pred["drug_name"].str.lower().isin(target_only_drugs).astype(int)
-        pred["has_smiles"] = pred["drug_name"].str.lower().map(
+        pred["is_target_only_drug"] = pred["drug_key"].isin(target_only_drugs).astype(int)
+        pred["has_smiles"] = pred["drug_key"].map(
             lambda x: int(x in drug_index_result.smiles_map)
         )
-        pred["has_graph"] = pred["drug_name"].str.lower().map(
-            lambda x: int(x in drug_index_result.smiles_map)
-        )
+        pred["has_graph"] = pred["drug_key"].map(lambda x: int(x in graph_keys))
         summary, per_drug = _metrics_from_predictions(pred, threshold, eval_name)
         results[eval_name] = {
             "predictions": pred,

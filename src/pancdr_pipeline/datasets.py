@@ -20,6 +20,8 @@ class LabeledSplitData:
     drug_names: List[str]
     drug_keys: List[str]
     cancer_types: List[str]
+    source_files: List[str]
+    eval_row_ids: List[str]
 
 
 @dataclass
@@ -67,6 +69,8 @@ def _build_labeled_split(
         if gexpr is None:
             continue
         drug_feat, drug_adj = drug_graphs[drug_key]
+        source_file = str(r.get("source_file", ""))
+        eval_row_id = "{}|{}|{}|{}".format(sid, drug_key, int(r["label"]), source_file)
         rows.append(
             {
                 "drug_feat": drug_feat,
@@ -77,6 +81,8 @@ def _build_labeled_split(
                 "drug_name": r.get("drug_name", drug_key),
                 "drug_key": drug_key,
                 "cancer_type": str(r.get("cancer_type", "")),
+                "source_file": source_file,
+                "eval_row_id": eval_row_id,
             }
         )
         if max_rows is not None and len(rows) >= max_rows:
@@ -92,6 +98,8 @@ def _build_labeled_split(
             drug_names=[],
             drug_keys=[],
             cancer_types=[],
+            source_files=[],
+            eval_row_ids=[],
         )
 
     return LabeledSplitData(
@@ -103,6 +111,8 @@ def _build_labeled_split(
         drug_names=[x["drug_name"] for x in rows],
         drug_keys=[x["drug_key"] for x in rows],
         cancer_types=[x["cancer_type"] for x in rows],
+        source_files=[x["source_file"] for x in rows],
+        eval_row_ids=[x["eval_row_id"] for x in rows],
     )
 
 

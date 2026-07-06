@@ -1,24 +1,48 @@
 """Fréchet distance between source and target latent distributions."""
 
-import warnings
 from pathlib import Path
-from typing import List
 
 import numpy as np
 import pandas as pd
+from scipy import linalg
 
 from pancdr_pipeline.reports import write_csv
 
 
-def _frechet_distance(x, y):
-    mu1, mu2 = x.mean(axis=0), y.mean(axis=0)
-    sigma1 = np.cov(x, rowvar=False)
-    sigma2 = np.cov(y, rowvar=False)
+def _frechet_distance(x, y, eps=1e-6):
+    x = np.asarray(x, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+
+    if x.ndim != 2 or y.ndim != 2:
+        raise ValueError("FID expects 2D arrays: x={}, y={}".format(x.shape, y.shape))
+
+    if x.shape[1] != y.shape[1]:
+        raise ValueError("Latent dims mismatch: x={}, y={}".format(x.shape[1], y.shape[1]))
+
+    mu1 = x.mean(axis=0)
+    mu2 = y.mean(axis=0)
+
+    sigma1 = np.atleast_2d(np.cov(x, rowvar=False))
+    sigma2 = np.atleast_2d(np.cov(y, rowvar=False))
+
+    sigma1 = sigma1 + np.eye(sigma1.shape[0]) * eps
+    sigma2 = sigma2 + np.eye(sigma2.shape[0]) * eps
+
     diff = mu1 - mu2
-    covmean = np.linalg.sqrtm(sigma1.dot(sigma2))
+    covmean = linalg.sqrtm(sigma1.dot(sigma2))
+
+    if not np.isfinite(covmean).all():
+        covmean = linalg.sqrtm(
+            (sigma1 + np.eye(sigma1.shape[0]) * eps).dot(
+                sigma2 + np.eye(sigma2.shape[0]) * eps
+            )
+        )
+
     if np.iscomplexobj(covmean):
         covmean = covmean.real
-    return float(diff.dot(diff) + np.trace(sigma1 + sigma2 - 2.0 * covmean))
+
+    fid = diff.dot(diff) + np.trace(sigma1 + sigma2 - 2.0 * covmean)
+    return float(max(fid, 0.0))
 
 
 def compute_fid_for_fold(latent_dir, fold_id):
@@ -82,8 +106,24 @@ def build_cross_fold_fid_summary(output_dir):
             if not df.empty:
                 write_csv(df, fid_path)
                 frames.append(df)
-    if frames:
-        cross = pd.concat(frames, ignore_index=True)
-        write_csv(cross, output_dir / "summary" / "fid_cross_fold_summary.csv")
-        return cross
-    return pd.DataFrame()
+    if not frames:
+        return pd.DataFrame()
+
+    cross = pd.concat(frames, ignore_index=True)
+    write_csv(cross, output_dir / "summary" / "fid_cross_fold_summary.csv")
+
+    agg = (
+        cross.groupby(["source_name", "target_name", "latent_type"])
+        .agg(
+            fid_mean=("fid", "mean"),
+            fid_std=("fid", "std"),
+            fid_min=("fid", "min"),
+            fid_max=("fid", "max"),
+            n_folds=("fold", "nunique"),
+            n_valid_folds=("fid", lambda s: int(s.notna().sum())),
+            n_nan_folds=("fid", lambda s: int(s.isna().sum())),
+        )
+        .reset_index()
+    )
+    write_csv(agg, output_dir / "summary" / "fid_cross_fold_aggregated_summary.csv")
+    return cross

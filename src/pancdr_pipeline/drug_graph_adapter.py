@@ -74,7 +74,7 @@ def _atom_features(atom):
 
 
 def _smiles_to_graph(smiles):
-    # type: (str) -> Tuple[np.ndarray, np.ndarray]
+    # type: (str) -> Tuple[np.ndarray, np.ndarray, int, int]
     _require_rdkit()
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
@@ -89,14 +89,15 @@ def _smiles_to_graph(smiles):
         feat_mat[i] = _atom_features(atom)
 
     adj = np.zeros((n_atoms, n_atoms), dtype=np.float32)
+    n_edges = 0
     for bond in mol.GetBonds():
         i = bond.GetBeginAtomIdx()
         j = bond.GetEndAtomIdx()
         adj[i, j] = 1.0
         adj[j, i] = 1.0
+        n_edges += 2
     np.fill_diagonal(adj, 1.0)
 
-    # Pad to MAX_ATOMS using PANCDR NormalizeAdj logic
     from utils import CalculateGraphFeat
 
     adj_list = []
@@ -104,7 +105,7 @@ def _smiles_to_graph(smiles):
         neighbors = [int(x) for x in np.where(adj[i] > 0)[0] if x != i]
         adj_list.append(neighbors)
     drug_feat, drug_adj = CalculateGraphFeat(feat_mat, adj_list)
-    return drug_feat.astype(np.float32), drug_adj.astype(np.float32)
+    return drug_feat.astype(np.float32), drug_adj.astype(np.float32), n_atoms, n_edges
 
 
 def build_drug_graphs(drug_index_result, output_dir, force_rebuild=False):
@@ -127,13 +128,13 @@ def build_drug_graphs(drug_index_result, output_dir, force_rebuild=False):
         has_smiles = drug_key in smiles_map
         ok = False
         err = ""
+        n_atoms = 0
         n_edges = 0
         try:
             if not has_smiles:
                 raise KeyError("missing SMILES")
-            drug_feat, drug_adj = _smiles_to_graph(smiles_map[drug_key])
+            drug_feat, drug_adj, n_atoms, n_edges = _smiles_to_graph(smiles_map[drug_key])
             graphs[drug_key] = (drug_feat, drug_adj)
-            n_edges = int((drug_adj[:MAX_ATOMS, :MAX_ATOMS] > 0).sum())
             ok = True
         except Exception as exc:
             err = str(exc)
@@ -149,8 +150,8 @@ def build_drug_graphs(drug_index_result, output_dir, force_rebuild=False):
         edge_rows.append(
             {
                 "drug_key": drug_key,
-                "n_atoms": int(min(MAX_ATOMS, n_edges)) if ok else 0,
-                "n_edges": n_edges,
+                "n_atoms": int(n_atoms),
+                "n_edges": int(n_edges),
                 "atom_feature_dim": ATOM_FEAT_DIM if ok else 0,
             }
         )

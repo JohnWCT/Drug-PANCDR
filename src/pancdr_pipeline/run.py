@@ -16,10 +16,10 @@ from pancdr_pipeline.drug_graph_adapter import build_drug_graphs
 from pancdr_pipeline.drug_index import TARGET_EVAL_NAMES, build_drug_index
 from pancdr_pipeline.evaluation import EVAL_NAMES, evaluate_fold
 from pancdr_pipeline.features import align_source_target_features
-from pancdr_pipeline.fid import build_cross_fold_fid_summary, compute_fid_for_fold
+from pancdr_pipeline.fid import build_cross_fold_fid_summary
 from pancdr_pipeline.hyperparams import load_pancdr_hyperparams, save_hyperparams
-from pancdr_pipeline.kmeans import build_cross_fold_kmeans_summary, run_kmeans_for_fold
-from pancdr_pipeline.latent import export_fold_latents
+from pancdr_pipeline.kmeans import build_cross_fold_kmeans_summary
+from pancdr_pipeline.latent import run_fold_latent_analysis
 from pancdr_pipeline.model_adapter import PANCDRModelAdapter
 from pancdr_pipeline.reports import (
     build_cross_fold_summary,
@@ -32,7 +32,6 @@ from pancdr_pipeline.reports import (
 from pancdr_pipeline.schema import normalize_all_inputs
 from pancdr_pipeline.splits import build_source_splits
 from pancdr_pipeline.trainer_wrapper import train_one_fold
-from pancdr_pipeline.tsne import run_tsne_for_fold
 
 
 def _set_global_seed(seed):
@@ -131,23 +130,16 @@ def run_pipeline(config):
         ).build_models()
         adapter.load_checkpoint(train_result.checkpoint_path)
 
-        eval_results = evaluate_fold(adapter, bundle, drug_index_result, config, fold_split.fold)
+        eval_results = evaluate_fold(
+            adapter, bundle, drug_index_result, drug_graph_bundle, config, fold_split.fold
+        )
         fdir = fold_dir(out, fold_split.fold)
         for eval_name, payload in eval_results.items():
             write_csv(payload["predictions"], fdir / "{}_prediction_results.csv".format(eval_name))
             write_csv(payload["summary"], fdir / "{}_metrics_summary.csv".format(eval_name))
             write_csv(payload["per_drug"], fdir / "{}_metrics_per_drug.csv".format(eval_name))
 
-        if config.run_latent:
-            export_fold_latents(adapter, bundle, out)
-            latent_dir = fdir / "latent"
-            if config.run_fid:
-                fid_df = compute_fid_for_fold(latent_dir, fold_split.fold)
-                write_csv(fid_df, latent_dir / "fid_summary.csv")
-            if config.run_kmeans:
-                run_kmeans_for_fold(latent_dir, fold_split.fold, seed=config.seed)
-            if config.run_tsne:
-                run_tsne_for_fold(latent_dir, fold_split.fold, seed=config.seed)
+        run_fold_latent_analysis(adapter, bundle, out, config)
 
     build_ensemble_predictions(out, eval_names, config.threshold)
     build_cross_fold_summary(out, eval_names)

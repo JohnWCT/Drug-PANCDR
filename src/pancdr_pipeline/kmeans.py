@@ -1,4 +1,4 @@
-"""K-means clustering on encoder_mu latent."""
+"""K-means clustering on encoder_mu latent (shared cluster model across domains)."""
 
 import json
 from pathlib import Path
@@ -12,46 +12,55 @@ from pancdr_pipeline.reports import write_csv
 
 def run_kmeans_for_fold(latent_dir, fold_id, n_clusters=5, seed=0):
     latent_dir = Path(latent_dir)
-    assignment_frames = []
-    summary_rows = []
+    mu_files = sorted(latent_dir.glob("*_encoder_mu.csv"))
+    if not mu_files:
+        return pd.DataFrame(), pd.DataFrame()
 
-    for csv_path in sorted(latent_dir.glob("*_encoder_mu.csv")):
+    frames = []
+    for csv_path in mu_files:
         df = pd.read_csv(str(csv_path))
-        latent_cols = [c for c in df.columns if c.startswith("latent_")]
-        if len(df) < n_clusters or not latent_cols:
-            continue
-        X = df[latent_cols].values
-        km = KMeans(n_clusters=min(n_clusters, len(df)), random_state=seed, n_init=10)
-        clusters = km.fit_predict(X)
-        out = df[["sample_id", "domain", "eval_name"]].copy()
-        if "cancer_type" in df.columns:
-            out["cancer_type"] = df["cancer_type"]
-        out["cluster"] = clusters
-        assignment_frames.append(out)
+        df["source_csv"] = csv_path.name
+        frames.append(df)
 
-        sil = float("nan")
-        if len(set(clusters)) > 1:
-            try:
-                sil = float(silhouette_score(X, clusters))
-            except Exception:
-                sil = float("nan")
-        sizes = {int(k): int(v) for k, v in pd.Series(clusters).value_counts().items()}
-        summary_rows.append(
+    combined = pd.concat(frames, ignore_index=True)
+    latent_cols = [c for c in combined.columns if c.startswith("latent_") and c[7:].isdigit()]
+    if len(combined) < n_clusters or not latent_cols:
+        return pd.DataFrame(), pd.DataFrame()
+
+    X = combined[latent_cols].values
+    n_fit = min(n_clusters, len(combined))
+    km = KMeans(n_clusters=n_fit, random_state=seed, n_init=10)
+    clusters = km.fit_predict(X)
+
+    assignments = combined[["sample_id", "domain", "eval_name"]].copy()
+    if "cancer_type" in combined.columns:
+        assignments["cancer_type"] = combined["cancer_type"]
+    assignments["cluster"] = clusters
+    assignments["fold"] = fold_id
+
+    sil = float("nan")
+    if len(set(clusters)) > 1:
+        try:
+            sil = float(silhouette_score(X, clusters))
+        except Exception:
+            sil = float("nan")
+
+    sizes = {int(k): int(v) for k, v in pd.Series(clusters).value_counts().items()}
+    summary = pd.DataFrame(
+        [
             {
                 "fold": fold_id,
-                "eval_name": df["eval_name"].iloc[0],
+                "eval_name": "combined_encoder_mu",
                 "n_clusters": len(sizes),
                 "silhouette_score": sil,
                 "cluster_size_json": json.dumps(sizes),
+                "n_samples": len(combined),
             }
-        )
+        ]
+    )
 
-    assignments = pd.concat(assignment_frames, ignore_index=True) if assignment_frames else pd.DataFrame()
-    summary = pd.DataFrame(summary_rows)
-    if not assignments.empty:
-        write_csv(assignments, latent_dir / "kmeans_assignments.csv")
-    if not summary.empty:
-        write_csv(summary, latent_dir / "kmeans_summary.csv")
+    write_csv(assignments, latent_dir / "kmeans_assignments.csv")
+    write_csv(summary, latent_dir / "kmeans_summary.csv")
     return assignments, summary
 
 

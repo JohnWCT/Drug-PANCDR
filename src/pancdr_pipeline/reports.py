@@ -46,14 +46,16 @@ def build_ensemble_predictions(output_dir, eval_names, threshold):
             df = pd.read_csv(str(pred_path))
             fold_id = int(fold_path.name.split("_")[1])
             df = df.rename(columns={"score": "fold_{}_score".format(fold_id)})
-            keep = ["sample_id", "drug_name", "label", "fold_{}_score".format(fold_id)]
+            merge_cols = ["eval_row_id", "sample_id", "drug_key", "drug_name", "label", "source_file"]
+            merge_cols = [c for c in merge_cols if c in df.columns]
+            keep = merge_cols + ["fold_{}_score".format(fold_id)]
             frames.append(df[keep])
 
         if not frames:
             continue
         merged = frames[0]
         for df in frames[1:]:
-            merged = merged.merge(df, on=["sample_id", "drug_name", "label"], how="outer")
+            merged = merged.merge(df, on=merge_cols, how="outer")
 
         score_cols = [c for c in merged.columns if c.startswith("fold_") and c.endswith("_score")]
         merged = merged.copy()

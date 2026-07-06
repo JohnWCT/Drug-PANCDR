@@ -13,7 +13,10 @@ from pancdr_pipeline.drug_graph_adapter import build_drug_graphs
 from pancdr_pipeline.drug_index import build_drug_index
 from pancdr_pipeline.evaluation import EVAL_NAMES, evaluate_fold
 from pancdr_pipeline.features import align_source_target_features
+from pancdr_pipeline.fid import build_cross_fold_fid_summary
 from pancdr_pipeline.hyperparams import load_pancdr_hyperparams
+from pancdr_pipeline.kmeans import build_cross_fold_kmeans_summary
+from pancdr_pipeline.latent import run_fold_latent_analysis
 from pancdr_pipeline.model_adapter import PANCDRModelAdapter
 from pancdr_pipeline.reports import (
     build_cross_fold_summary,
@@ -73,7 +76,7 @@ def run_target_inference(config, checkpoint_dir, output_dir=None, eval_prefixes=
     )
     drug_graph_bundle = build_drug_graphs(drug_index_result, out, force_rebuild=True)
 
-    manifest = load_manifest(checkpoint_dir)
+    load_manifest(checkpoint_dir)
     splits = load_source_splits_from_reports(
         checkpoint_dir,
         normalized["source_response"],
@@ -108,7 +111,9 @@ def run_target_inference(config, checkpoint_dir, output_dir=None, eval_prefixes=
         ).build_models()
         adapter.load_checkpoint(str(ckpt))
 
-        eval_results = evaluate_fold(adapter, bundle, drug_index_result, config, fold_split.fold)
+        eval_results = evaluate_fold(
+            adapter, bundle, drug_index_result, drug_graph_bundle, config, fold_split.fold
+        )
         fdir = fold_dir(out, fold_split.fold)
         for eval_name, payload in eval_results.items():
             if eval_name not in eval_prefixes and eval_name != "source_test":
@@ -118,9 +123,15 @@ def run_target_inference(config, checkpoint_dir, output_dir=None, eval_prefixes=
                 write_csv(payload["summary"], fdir / "{}_metrics_summary.csv".format(eval_name))
                 write_csv(payload["per_drug"], fdir / "{}_metrics_per_drug.csv".format(eval_name))
 
+        run_fold_latent_analysis(adapter, bundle, out, config)
+
     if not skip_reports:
         build_ensemble_predictions(out, eval_prefixes, config.threshold)
         build_cross_fold_summary(out, eval_prefixes)
+        if config.run_fid:
+            build_cross_fold_fid_summary(out)
+        if config.run_kmeans:
+            build_cross_fold_kmeans_summary(out)
 
     write_json(
         {
@@ -129,6 +140,10 @@ def run_target_inference(config, checkpoint_dir, output_dir=None, eval_prefixes=
             "output_dir": str(out),
             "eval_prefixes": eval_prefixes,
             "tcga_labels_in_training": False,
+            "run_latent": config.run_latent,
+            "run_fid": config.run_fid,
+            "run_kmeans": config.run_kmeans,
+            "run_tsne": config.run_tsne,
         },
         out / "manifest.json",
     )

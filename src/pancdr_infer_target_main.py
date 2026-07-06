@@ -26,6 +26,14 @@ def parse_args():
         default="target_primary,target_only,dapl,target_aacdr,target_aacdr_only",
     )
     p.add_argument("--skip_reports", action="store_true")
+    p.add_argument("--run_latent", action="store_true")
+    p.add_argument("--run_fid", action="store_true")
+    p.add_argument("--run_kmeans", action="store_true")
+    p.add_argument("--run_tsne", action="store_true")
+    p.add_argument("--no_latent", action="store_true")
+    p.add_argument("--no_fid", action="store_true")
+    p.add_argument("--no_kmeans", action="store_true")
+    p.add_argument("--no_tsne", action="store_true")
     return p.parse_args()
 
 
@@ -42,14 +50,37 @@ def main():
         overrides["drug_smiles_path"] = args.drug_smiles_path
     if args.device:
         overrides["device"] = args.device
-    overrides["run_latent"] = False
-    overrides["run_fid"] = False
-    overrides["run_kmeans"] = False
-    overrides["run_tsne"] = False
+
+    run_latent = base.run_latent
+    run_fid = base.run_fid
+    run_kmeans = base.run_kmeans
+    run_tsne = base.run_tsne
+    if args.run_latent:
+        run_latent = True
+    if args.run_fid:
+        run_fid = True
+    if args.run_kmeans:
+        run_kmeans = True
+    if args.run_tsne:
+        run_tsne = True
+    if args.no_latent:
+        run_latent = False
+    if args.no_fid:
+        run_fid = False
+    if args.no_kmeans:
+        run_kmeans = False
+    if args.no_tsne:
+        run_tsne = False
+
+    overrides["run_latent"] = run_latent
+    overrides["run_fid"] = run_fid
+    overrides["run_kmeans"] = run_kmeans
+    overrides["run_tsne"] = run_tsne
 
     merged = dict(base.__dict__)
     merged.update(overrides)
-    config = PANCDRPipelineConfig(**merged)
+    fields = PANCDRPipelineConfig.__dataclass_fields__
+    config = PANCDRPipelineConfig(**{k: v for k, v in merged.items() if k in fields})
 
     eval_prefixes = [x.strip() for x in args.eval_prefixes.split(",") if x.strip()]
     out = run_target_inference(
