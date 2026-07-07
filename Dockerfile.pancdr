@@ -132,6 +132,7 @@ import hickle
 import sklearn
 import matplotlib
 import umap
+from rdkit import Chem
 
 print('python import check: OK')
 print('python:', __import__('sys').version)
@@ -145,6 +146,7 @@ print('pandas:', pandas.__version__)
 print('hickle:', hickle.__version__)
 print('sklearn:', sklearn.__version__)
 print('matplotlib:', matplotlib.__version__)
+print('rdkit:', Chem.MolFromSmiles('CCO') is not None)
 PY
 
 CMD ["/bin/bash"]
